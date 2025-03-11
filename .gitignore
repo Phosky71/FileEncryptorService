@@ -1,0 +1,8 @@
+.venv
+.env
+cert.pem
+key.pem
+cifrado.py
+decrypt_gui.py
+.idea
+__pycache__
