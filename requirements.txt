@@ -9,3 +9,7 @@ requests~=2.32.3
 pydantic~=2.10.6
 dotenv~=0.9.9
 websocket~=0.2.1
+
+tkinker
+pymongo[srv]
+
