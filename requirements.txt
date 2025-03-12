@@ -1,6 +1,6 @@
 fastapi~=0.115.10
 uvicorn==0.34.0
-pymongo~=3.11.0
+pymongo[srv]==4.9.2
 python-dotenv==1.0.1
 cryptography~=44.0.1
 websocket-client~=1.8.0
@@ -9,7 +9,4 @@ requests~=2.32.3
 pydantic~=2.10.6
 dotenv~=0.9.9
 websocket~=0.2.1
-
-tkinker
-pymongo[srv]
 
