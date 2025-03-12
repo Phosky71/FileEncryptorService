@@ -1,14 +1,14 @@
-from typing import List
+import secrets
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Header
 from pydantic import BaseModel
 
-from database import collection, decrypted_collection, key_collection
+from database import collection, decrypted_collection, key_collection, db
 
 app = FastAPI()
 
 
-# Modelo para los datos de archivos
+# Modelos existentes
 class FileData(BaseModel):
     file_name: str
     data: str
@@ -19,10 +19,15 @@ class KeyData(BaseModel):
     key: str
 
 
-# Sistema de gestión de conexiones WebSocket
+# Modelo para registro de clientes
+class ClientRegistrationResponse(BaseModel):
+    api_key: str
+
+
+# WebSocket (sin cambios)
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections = []
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -41,9 +46,6 @@ manager = ConnectionManager()
 
 @app.websocket("/chat")
 async def websocket_endpoint(websocket: WebSocket):
-    """
-    Endpoint para gestionar conexiones WebSocket.
-    """
     await manager.connect(websocket)
     try:
         while True:
@@ -53,9 +55,25 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 
-# Endpoints existentes
+# Endpoint para registrar clientes y generar API Key
+@app.post("/register/", response_model=ClientRegistrationResponse)
+async def register_client():
+    api_key = secrets.token_hex(16)
+    db["api_keys"].insert_one({"api_key": api_key, "active": True})
+    return {"api_key": api_key}
+
+
+# Función auxiliar para validar API Keys
+def validate_api_key(api_key: str):
+    key_data = db["api_keys"].find_one({"api_key": api_key, "active": True})
+    if not key_data:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+
+# Endpoints existentes protegidos con API Key
 @app.post("/save_file/")
-async def save_file(file_data: FileData):
+async def save_file(file_data: FileData, api_key: str = Header(None)):
+    validate_api_key(api_key)
     try:
         collection.insert_one(file_data.dict())
         return {"message": "File saved successfully"}
@@ -64,7 +82,8 @@ async def save_file(file_data: FileData):
 
 
 @app.post("/save_key/")
-async def save_key(key_data: KeyData):
+async def save_key(key_data: KeyData, api_key: str = Header(None)):
+    validate_api_key(api_key)
     try:
         key_collection.update_one(
             {"username": key_data.username},
@@ -77,7 +96,8 @@ async def save_key(key_data: KeyData):
 
 
 @app.get("/get_key/{username}")
-async def get_key(username: str):
+async def get_key(username: str, api_key: str = Header(None)):
+    validate_api_key(api_key)
     try:
         key_data = key_collection.find_one({"username": username})
         if key_data:
@@ -89,7 +109,8 @@ async def get_key(username: str):
 
 
 @app.post("/move_decrypted_file/")
-async def move_decrypted_file(file_data: FileData):
+async def move_decrypted_file(file_data: FileData, api_key: str = Header(None)):
+    validate_api_key(api_key)
     try:
         collection.delete_one({"file_name": file_data.file_name})
         decrypted_collection.insert_one(file_data.dict())
