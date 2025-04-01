@@ -1,11 +1,12 @@
 import json
+import os
 import secrets
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Header
 from pydantic import BaseModel
 
-from database import collection, decrypted_collection, key_collection, db, messages_collection
+from servidor.database import collection, decrypted_collection, key_collection, db, messages_collection
 
 app = FastAPI()
 
@@ -229,12 +230,48 @@ async def get_encrypted_files(api_key: str = Header(None)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/decrypt_file/")
+async def decrypt_file(file_data: dict, api_key: str = Header(None)):
+    validate_api_key(api_key)
+    try:
+        # Obtener datos del archivo y usuario
+        file_name = file_data.get("file_name")
+        file_path = file_data.get("file_path")
+        username = file_data.get("username")
+
+        # Obtener la clave del usuario
+        key_data = key_collection.find_one({"username": username})
+        if not key_data:
+            raise HTTPException(status_code=404, detail="Key not found")
+
+        # Descifrar usando AESCipher
+        from servidor.cipher import AESCipher
+        cipher = AESCipher(username)
+
+        # Descifrar el archivo directamente
+        cipher.decrypt_file(file_path)
+
+        # Mover el archivo a la colección de descifrados
+        collection.delete_one({"file_name": file_name})
+        decrypted_collection.insert_one({"file_name": file_name, "data": ""})
+
+        return {"message": "File decrypted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Configuración HTTPS con certificados SSL
+# if __name__ == "__main__":
+#     import uvicorn
+#
+#     # Ruta a los certificados SSL generados con OpenSSL
+#     ssl_certfile = "cert.pem"
+#     ssl_keyfile = "key.pem"
+#
+#     uvicorn.run(app, host="0.0.0.0", port=443, ssl_certfile=ssl_certfile, ssl_keyfile=ssl_keyfile)
+
+# Configuración para ejecutar en Render
 if __name__ == "__main__":
     import uvicorn
 
-    # Ruta a los certificados SSL generados con OpenSSL
-    ssl_certfile = "cert.pem"
-    ssl_keyfile = "key.pem"
-
-    uvicorn.run(app, host="0.0.0.0", port=443, ssl_certfile=ssl_certfile, ssl_keyfile=ssl_keyfile)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
