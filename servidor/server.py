@@ -1,5 +1,4 @@
 import json
-import os
 import secrets
 from datetime import datetime
 
@@ -7,6 +6,12 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Head
 from pydantic import BaseModel
 
 from servidor.database import collection, decrypted_collection, key_collection, db, messages_collection
+
+import os
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import padding
+
 
 app = FastAPI()
 
@@ -256,6 +261,70 @@ async def decrypt_file(file_data: dict, api_key: str = Header(None)):
         decrypted_collection.insert_one({"file_name": file_name, "data": ""})
 
         return {"message": "File decrypted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/encrypt_file/")
+async def encrypt_file(file_data: dict, api_key: str = Header(None)):
+    validate_api_key(api_key)
+    try:
+        # Obtener datos del archivo y usuario
+        file_name = file_data.get("file_name")
+        hex_data = file_data.get("file_data")
+        username = file_data.get("username")
+
+        # Convertir datos hexadecimales a bytes
+        binary_data = bytes.fromhex(hex_data)
+
+        # Obtener o generar la clave del usuario
+        key_data = key_collection.find_one({"username": username})
+        if not key_data:
+            # Generar una nueva clave si no existe
+            from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+            from cryptography.hazmat.primitives import hashes
+            import base64
+            import os
+
+            salt = os.urandom(16)
+            kdf = PBKDF2HMAC(
+                algorithm=hashes.SHA256(),
+                length=32,
+                salt=salt,
+                iterations=100000,
+                backend=default_backend()
+            )
+            key = base64.urlsafe_b64encode(kdf.derive(username.encode()))
+
+            # Guardar la clave en la base de datos
+            key_collection.insert_one({"username": username, "key": key.decode('utf-8')})
+        else:
+            key = key_data["key"].encode('utf-8')
+
+        # Cifrar usando AESCipher
+        from servidor.cipher import AESCipher
+        cipher = AESCipher(username)
+
+        # Cifrar los datos
+        iv = os.urandom(16)
+        padder = padding.PKCS7(algorithms.AES.block_size).padder()
+        padded_data = padder.update(binary_data) + padder.finalize()
+
+        cipher_obj = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+        encryptor = cipher_obj.encryptor()
+        ciphertext = encryptor.update(padded_data) + encryptor.finalize()
+
+        encrypted_data = iv + ciphertext
+
+        # Guardar el archivo original en la base de datos
+        collection.insert_one({
+            "file_name": file_name,
+            "data": binary_data.decode('utf-8', errors='ignore')
+        })
+
+        # Devolver datos cifrados
+        return {"message": "File encrypted successfully",
+                "encrypted_data": encrypted_data.hex()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
